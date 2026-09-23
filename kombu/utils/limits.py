@@ -1,4 +1,4 @@
-""" . "说明"Token bucket implementation for rate limiting.""" . "说明"
+"""Token bucket implementation for rate limiting."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ __all__ = ('TokenBucket',)
 
 
 class TokenBucket:
-    """ . "说明"Token Bucket Algorithm.
+    """Token Bucket Algorithm.
 
     See Also
     --------
@@ -23,7 +23,7 @@ class TokenBucket:
         Thread Safety: This implementation is not thread safe.
         Access to a `TokenBucket` instance should occur within the critical
         section of any multithreaded code.
-    """ . "说明"
+    """
 
     #: The rate in tokens/second that the bucket will be refilled.
     fill_rate = None
@@ -51,7 +51,7 @@ class TokenBucket:
         self.contents.clear()
 
     def can_consume(self, tokens=1):
-        """ . "说明"Check if one or more tokens can be consumed.
+        """Check if one or more tokens can be consumed.
 
         Returns
         -------
@@ -61,27 +61,38 @@ class TokenBucket:
                 Calls will only consume `tokens` (the number requested)
                 or zero tokens -- it will never consume a partial number
                 of tokens.
-        """ . "说明"
+        """
         if tokens <= self._get_tokens():
             self._tokens -= tokens
             return True
         return False
 
     def expected_time(self, tokens=1):
-        """ . "说明"Return estimated time of token availability.
+        """Return estimated time of token availability.
 
         Returns
         -------
             float: the time in seconds.
-        """ . "说明"
+        """
         _tokens = self._get_tokens()
         tokens = max(tokens, _tokens)
         return (tokens - _tokens) / self.fill_rate
 
     def _get_tokens(self):
-        if self._tokens < self.capacity:
-            now = monotonic()
-            delta = self.fill_rate * (now - self.timestamp)
+        # Read the clock *before* touching the token count and always advance
+        # the timestamp to ``now``, regardless of whether the bucket is full.
+        # Advancing the timestamp only while the bucket was below capacity
+        # left it stale across every call made at capacity; a later refill was
+        # then computed against that stale timestamp and time spent idle at
+        # capacity was incorrectly counted as recovery time, instantly
+        # refilling the bucket.
+        now = monotonic()
+        elapsed = now - self.timestamp
+        if self._tokens < self.capacity and elapsed > 0.0:
+            delta = self.fill_rate * elapsed
             self._tokens = min(self.capacity, self._tokens + delta)
-            self.timestamp = now
+        # A negative ``elapsed`` (a backwards clock jump) must not drain
+        # tokens; re-baselining the timestamp is enough, and normal refills
+        # resume from it on subsequent calls.
+        self.timestamp = now
         return self._tokens
